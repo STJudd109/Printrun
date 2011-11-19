@@ -215,7 +215,7 @@ class gviz(wx.Panel):
 if __name__ == '__main__':
     app = wx.App(False)
     #main = window(open("/home/kliment/designs/spinner/arm_export.gcode"))
-    main = window(open("jam.gcode"))
+    main = window(open("JointTest.default.gcode"))
     main.Show()
     app.MainLoop()
 

@@ -132,8 +132,6 @@ class SkeinforgeQuickEditDialog(wx.Dialog):
                     leftSettingsSizer.Add(craftStaticBoxSizer)
                 else:
                     rightSettingsSizer.Add(craftStaticBoxSizer)
-                #settingsSizer.Add(craftStaticBoxSizer,pos=(settingsRow - col,col))
-                #settingsRow += 1
 
         settingsSizer.Add(leftSettingsSizer)
         settingsSizer.Add(rightSettingsSizer)
