@@ -1,8 +1,31 @@
 #!/usr/bin/env python
+
+# This file is part of the Printrun suite.
+# 
+# Printrun is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+# 
+# Printrun is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with Printrun.  If not, see <http://www.gnu.org/licenses/>.
+
 import cmd, printcore, sys 
 import glob, os, time
 import sys, subprocess 
+import math
 from math import sqrt
+import gettext
+if os.path.exists('/usr/share/pronterface/locale'):
+    gettext.install('pronterface', '/usr/share/pronterface/locale', unicode=1)
+else: 
+    gettext.install('pronterface', './locale', unicode=1)
+
 if os.name=="nt":
     try:
         import _winreg
@@ -22,51 +45,50 @@ def dosify(name):
     return os.path.split(name)[1].split(".")[0][:8]+".g"
     
 def measurements(g):
-	Xcur=0.0
-	Ycur=0.0
-	Zcur=0.0
-	Xmin=1000000
-	Ymin=1000000
-	Zmin=1000000
-	Xmax=-1000000
-	Ymax=-1000000
-	Zmax=-1000000
-	Xtot=0
-	Ytot=0
-	Ztot=0
-	
-	
-	for i in g:
-		if "X" in i and ("G1" in i or "G0" in i):
-			try:
-				Xcur = float(i.split("X")[1].split(" ")[0])
-				if Xcur<Xmin and Xcur>5.0: Xmin=Xcur
-				if Xcur>Xmax: Xmax=Xcur
-			except:
-				pass
-		if "Y" in i and ("G1" in i or "G0" in i):
-			try:
-				Ycur = float(i.split("Y")[1].split(" ")[0])
-				if Ycur<Ymin and Ycur>5.0: Ymin=Ycur
-				if Ycur>Ymax: Ymax=Ycur
-			except:
-				pass
-				
-		if "Z" in i and ("G1" in i or "G0" in i):
-			try:
-				Zcur = float(i.split("Z")[1].split(" ")[0])
-				if Zcur<Zmin: Zmin=Zcur
-				if Zcur>Zmax: Zmax=Zcur
-			except:
-				pass
-				
-		
-		Xtot = Xmax - Xmin
-		Ytot = Ymax - Ymin
-		Ztot = Zmax - Zmin		
-		
-            
-	return (Xtot,Ytot,Ztot,Xmin,Xmax,Ymin,Ymax,Zmin,Zmax)
+    Xcur=0.0
+    Ycur=0.0
+    Zcur=0.0
+    Xmin=1000000
+    Ymin=1000000
+    Zmin=1000000
+    Xmax=-1000000
+    Ymax=-1000000
+    Zmax=-1000000
+    Xtot=0
+    Ytot=0
+    Ztot=0
+    
+    
+    for i in g:
+        if "X" in i and ("G1" in i or "G0" in i):
+            try:
+                Xcur = float(i.split("X")[1].split(" ")[0])
+                if Xcur<Xmin and Xcur>5.0: Xmin=Xcur
+                if Xcur>Xmax: Xmax=Xcur
+            except:
+                pass
+        if "Y" in i and ("G1" in i or "G0" in i):
+            try:
+                Ycur = float(i.split("Y")[1].split(" ")[0])
+                if Ycur<Ymin and Ycur>5.0: Ymin=Ycur
+                if Ycur>Ymax: Ymax=Ycur
+            except:
+                pass
+                
+        if "Z" in i and ("G1" in i or "G0" in i):
+            try:
+                Zcur = float(i.split("Z")[1].split(" ")[0])
+                if Zcur<Zmin: Zmin=Zcur
+                if Zcur>Zmax: Zmax=Zcur
+            except:
+                pass
+                
+        
+        Xtot = Xmax - Xmin
+        Ytot = Ymax - Ymin
+        Ztot = Zmax - Zmin		
+        
+    return (Xtot,Ytot,Ztot,Xmin,Xmax,Ymin,Ymax,Zmin,Zmax)
 
 def totalelength(g):
     tot=0
@@ -86,55 +108,79 @@ def get_coordinate_value(axis, parts):
         if (axis in i):
             return float(i[1:])
     return None
-	
-	
+
+def hypot3d(X1, Y1, Z1, X2=0.0, Y2=0.0, Z2=0.0): 
+    return math.hypot(X2-X1, math.hypot(Y2-Y1, Z2-Z1))
+
 def estimate_duration(g):
-	extra_cost_per_movement = 0.02
-	total_duration = 0
-	feedrate = 0
-	X_last_position = 0
-	Y_last_position = 0
-	for i in g:
-		if "G1" in i and ("X" in i or "Y" in i or "F" in i or "E" in i):
-			parts = i.split(" ")
-			X = get_coordinate_value("X", parts[1:])
-			Y = get_coordinate_value("Y", parts[1:])
-			F = get_coordinate_value("F", parts[1:])
-			E = get_coordinate_value("E", parts[1:])
+    
+    lastx = lasty = lastz = laste = lastf = 0.0
+    x = y = z = e = f = 0.0
+    currenttravel = 0.0
+    totaltravel = 0.0
+    moveduration = 0.0
+    totalduration = 0.0
+    acceleration = 1500.0 #mm/s/s  ASSUMING THE DEFAULT FROM SPRINTER !!!!
+    layerduration = 0.0
+    layerbeginduration = 0.0
+    layercount=0
+    #TODO:
+    # get device caps from firmware: max speed, acceleration/axis (including extruder)
+    # calculate the maximum move duration accounting for above ;)
+    # print ".... estimating ...."
+    for i in g:
+        i=i.split(";")[0]
+        if "G4" in i or "G1" in i:
+            if "G4" in i:
+                parts = i.split(" ")
+                moveduration = get_coordinate_value("P", parts[1:])
+                if moveduration is None:
+                    continue
+                else:
+                    moveduration /= 1000.0
+            if "G1" in i:
+                parts = i.split(" ")
+                x = get_coordinate_value("X", parts[1:])
+                if x is None: x=lastx
+                y = get_coordinate_value("Y", parts[1:])
+                if y is None: y=lasty
+                z = get_coordinate_value("Z", parts[1:])
+                if (z is None) or  (z<lastz): z=lastz # Do not increment z if it's below the previous (Lift z on move fix)
+                e = get_coordinate_value("E", parts[1:])
+                if e is None: e=laste
+                f = get_coordinate_value("F", parts[1:])
+                if f is None: f=lastf
+                else: f /= 60.0 # mm/s vs mm/m
+                
+                # given last feedrate and current feedrate calculate the distance needed to achieve current feedrate.
+                # if travel is longer than req'd distance, then subtract distance to achieve full speed, and add the time it took to get there.
+                # then calculate the time taken to complete the remaining distance
 
-			if (F is not None):
-				feedrate = F / 60
-			
-			distance = 0
-			if (X is None and Y is None and E is not None):
-				distance = abs(E)
-			elif (X is not None and Y is None):
-				distance = X - X_last_position
-				X_last_position = X
-			elif (X is None and Y is not None):
-				distance = Y - Y_last_position
-				Y_last_position = Y
-			elif (X is not None and Y is not None):
-				X_distance = X - X_last_position
-				Y_distance = Y - Y_last_position
-				distance = sqrt(X_distance * X_distance + Y_distance * Y_distance)
-				X_last_position = X
-				Y_last_position = Y
+                currenttravel = hypot3d(x, y, z, lastx, lasty, lastz)
+                distance = 2* ((lastf+f) * (f-lastf) * 0.5 ) / acceleration  #2x because we have to accelerate and decelerate
+                if distance <= currenttravel and ( lastf + f )!=0 and f!=0:
+                    moveduration = 2 * distance / ( lastf + f )
+                    currenttravel -= distance
+                    moveduration += currenttravel/f
+                else:
+                    moveduration = math.sqrt( 2 * distance / acceleration )
 
-			if (feedrate == 0 or distance == 0): continue
-			
-			time_for_move = distance / feedrate
-			acceleration = feedrate / time_for_move
-			halfway_feedrate = acceleration * time_for_move / 2
-			duration = halfway_feedrate * 2 / acceleration
+            totalduration += moveduration
 
-			total_duration += duration + extra_cost_per_movement
+            if z > lastz:
+                layercount +=1
+                #print "layer z: ", lastz, " will take: ", time.strftime('%H:%M:%S', time.gmtime(totalduration-layerbeginduration))
+                layerbeginduration = totalduration
 
-	mod_minutes = total_duration % (60 * 60)
-	mod_seconds = mod_minutes % 60		
-	
-	return "{0:02d}h{1:02d}m".format(int((total_duration - mod_minutes) / (60 * 60)), int((mod_minutes - mod_seconds) / 60))
-	
+            lastx = x
+            lasty = y
+            lastz = z
+            laste = e
+            lastf = f
+
+    #print "Total Duration: " #, time.strftime('%H:%M:%S', time.gmtime(totalduration))
+    return "{0:d} layers, ".format(int(layercount))+time.strftime('%H:%M:%S', time.gmtime(totalduration))
+
 class Settings:
     #def _temperature_alias(self): return {"pla":210,"abs":230,"off":0}
     #def _temperature_validate(self,v):
@@ -146,13 +192,17 @@ class Settings:
         # the initial value determines the type
         self.port = ""
         self.baudrate = 115200
-        self.temperature_pla = 185
-        self.temperature_abs = 230
-        self.bedtemp_pla = 60
         self.bedtemp_abs = 110
+        self.bedtemp_pla = 60
+        self.temperature_abs = 230
+        self.temperature_pla = 185
         self.xy_feedrate = 3000
         self.z_feedrate = 200
         self.e_feedrate = 300
+        self.slicecommand="python skeinforge/skeinforge_application/skeinforge_utilities/skeinforge_craft.py $s"
+        self.sliceoptscommand="python skeinforge/skeinforge_application/skeinforge.py"
+        self.final_command = ""
+
     def _set(self,key,value):
         try:
             value = getattr(self,"_%s_alias"%key)()[value]
@@ -213,6 +263,20 @@ class pronsole(cmd.Cmd):
         self.settings._bedtemp_abs_cb = self.set_temp_preset
         self.settings._bedtemp_pla_cb = self.set_temp_preset
         self.monitoring=0
+        self.helpdict = {}
+        self.helpdict["baudrate"] = _("Communications Speed (default: 115200)")
+        self.helpdict["bedtemp_abs"] = _("Heated Build Platform temp for ABS (default: 110 deg C)")
+        self.helpdict["bedtemp_pla"] = _("Heated Build Platform temp for PLA (default: 60 deg C)")
+        self.helpdict["e_feedrate"] = _("Feedrate for Control Panel Moves in Extrusions (default: 300mm/min)")
+        self.helpdict["port"] = _("Port used to communicate with printer")
+        self.helpdict["slicecommand"] = _("Slice command\n   default:\n       python skeinforge/skeinforge_application/skeinforge_utilities/skeinforge_craft.py $s)")
+        self.helpdict["sliceoptscommand"] = _("Slice settings command\n   default:\n       python skeinforge/skeinforge_application/skeinforge.py")
+        self.helpdict["temperature_abs"] = _("Extruder temp for ABS (default: 230 deg C)")
+        self.helpdict["temperature_pla"] = _("Extruder temp for PLA (default: 185 deg C)")
+        self.helpdict["xy_feedrate"] = _("Feedrate for Control Panel Moves in X and Y (default: 3000mm/min)")
+        self.helpdict["z_feedrate"] = _("Feedrate for Control Panel Moves in Z (default: 200mm/min)")
+        self.helpdict["final_command"] = _("Executable to run when the print is finished")
+        self.commandprefixes='MGT$'
     
     def set_temp_preset(self,key,value):
         if not key.startswith("bed"):
@@ -467,9 +531,12 @@ class pronsole(cmd.Cmd):
             definition += "\n"
         try:
             written = False
-            rco=open(self.rc_filename+"~new","w")
             if os.path.exists(self.rc_filename):
-                rci=open(self.rc_filename,"r")
+                import shutil
+                shutil.copy(self.rc_filename,self.rc_filename+"~bak")
+                rci=open(self.rc_filename+"~bak","r")
+            rco=open(self.rc_filename,"w")
+            if rci is not None:
                 overwriting = False
                 for rc_cmd in rci:
                     l = rc_cmd.rstrip()
@@ -488,11 +555,7 @@ class pronsole(cmd.Cmd):
                 rco.write(definition)
             if rci is not None:
                 rci.close()
-                if os.path.exists(self.rc_filename+"~old"):
-                    os.remove(rci.name+"~old")
-                os.rename(rci.name,rci.name+"~old")
             rco.close()
-            os.rename(rco.name,self.rc_filename)
             #if definition != "":
             #    print "Saved '"+key+"' to '"+self.rc_filename+"'"
             #else:
@@ -809,14 +872,14 @@ class pronsole(cmd.Cmd):
         print "! os.listdir('.')"
         
     def default(self,l):
-        if(l[0]=='M' or l[0]=="G"):
+        if(l[0] in self.commandprefixes.upper()):
             if(self.p and self.p.online):
                 print "SENDING:"+l
                 self.p.send_now(l)
             else:
                 print "Printer is not online."
             return
-        if(l[0]=='m' or l[0]=="g"):
+        elif(l[0] in self.commandprefixes.lower()):
             if(self.p and self.p.online):
                 print "SENDING:"+l.upper()
                 self.p.send_now(l.upper())
@@ -1053,7 +1116,7 @@ class pronsole(cmd.Cmd):
                 if(self.sdprinting):
                     self.p.send_now("M27")
                 time.sleep(interval)
-                print (self.tempreadings.replace("\r","").replace("T","Hotend").replace("B","Bed").replace("\n","").replace("ok ",""))
+                #print (self.tempreadings.replace("\r","").replace("T","Hotend").replace("B","Bed").replace("\n","").replace("ok ",""))
                 if(self.p.printing):
                     print "Print progress: ", 100*float(self.p.queueindex)/len(self.p.mainqueue), "%"
                 
@@ -1070,6 +1133,9 @@ class pronsole(cmd.Cmd):
         print "monitor - Reports temperature and SD print status (if SD printing) every 5 seconds"
         print "monitor 2 - Reports temperature and SD print status (if SD printing) every 2 seconds"
         
+    def expandcommand(self,c):
+        return c.replace("$python",sys.executable)
+        
     def do_skein(self,l):
         l=l.split()
         if len(l)==0:
@@ -1083,27 +1149,17 @@ class pronsole(cmd.Cmd):
             if not(os.path.exists(l[0])):
                 print "File not found!"
                 return
-        if not os.path.exists("skeinforge"):
-            print "Skeinforge not found. \nPlease copy Skeinforge into a directory named \"skeinforge\" in the same directory as this file."
-            return
-        if not os.path.exists("skeinforge/__init__.py"):
-            f=open("skeinforge/__init__.py","w")
-            f.close()
         try:
-            from skeinforge.skeinforge_application.skeinforge_utilities import skeinforge_craft
-            from skeinforge.skeinforge_application import skeinforge
+            import shlex
             if(settings):
-                param = "skeinforge/skeinforge_application/skeinforge.py"
-                print "Entering skeinforge settings: ",sys.executable," ",param
-                subprocess.call([sys.executable,param])
+                param = self.expandcommand(self.settings.sliceoptscommand).replace("\\","\\\\").encode()
+                print "Entering skeinforge settings: ",param
+                subprocess.call(shlex.split(param))
             else:
-                if(len(l)>1):
-                    if(l[1] == "view"):
-                        skeinforge_craft.writeOutput(l[0],True)
-                    else:
-                        skeinforge_craft.writeOutput(l[0],False)
-                else:
-                    skeinforge_craft.writeOutput(l[0],False)
+                param = self.expandcommand(self.settings.slicecommand).encode()
+                print "Slicing: ",param
+                params=[i.replace("$s",l[0]).replace("$o",l[0].replace(".stl","_export.gcode").replace(".STL","_export.gcode")).encode() for i in shlex.split(param.replace("\\","\\\\").encode())]
+                subprocess.call(params)
                 print "Loading skeined file."
                 self.do_load(l[0].replace(".stl","_export.gcode"))
         except Exception,e:

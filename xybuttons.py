@@ -1,9 +1,28 @@
+# This file is part of the Printrun suite.
+# 
+# Printrun is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+# 
+# Printrun is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with Printrun.  If not, see <http://www.gnu.org/licenses/>.
+
 import wx, os, math
 from bufferedcanvas import *
 
-def imagefile(filename):
-    return os.path.join(os.path.dirname(__file__), "images", filename)
 
+def imagefile(filename):
+    if os.path.exists(os.path.join(os.path.dirname(__file__), "images", filename)):
+        return os.path.join(os.path.dirname(__file__), "images", filename)
+    else:
+        return os.path.join(os.path.split(os.path.split(__file__)[0])[0], "images", filename)
+    
 def sign(n):
     if n < 0: return -1
     elif n > 0: return 1
@@ -28,7 +47,7 @@ class XYButtons(BufferedCanvas):
     center = (124, 121)
     spacer = 7
 
-    def __init__(self, parent, moveCallback=None, cornerCallback=None, ID=-1):
+    def __init__(self, parent, moveCallback=None, cornerCallback=None, spacebarCallback=None, ID=-1):
         self.bg_bmp = wx.Image(imagefile("control_xy.png"),wx.BITMAP_TYPE_PNG).ConvertToBitmap()
         self.keypad_bmp = wx.Image(imagefile("arrow_keys.png"),wx.BITMAP_TYPE_PNG).ConvertToBitmap()
         self.keypad_idx = -1
@@ -37,10 +56,13 @@ class XYButtons(BufferedCanvas):
         self.corner = None
         self.moveCallback = moveCallback
         self.cornerCallback = cornerCallback
+        self.spacebarCallback = spacebarCallback
         self.enabled = False
-
+        # Remember the last clicked buttons, so we can repeat when spacebar pressed
+        self.lastMove = None
+        self.lastCorner = None
+    
         BufferedCanvas.__init__(self, parent, ID)
-
         self.SetSize(self.bg_bmp.GetSize())
 
         # Set up mouse and keyboard event capture
@@ -58,7 +80,17 @@ class XYButtons(BufferedCanvas):
     def enable(self):
         self.enabled = True
         self.update()
+
+    def repeatLast(self):
+        if self.lastMove:
+            self.moveCallback(*self.lastMove)
+        if self.lastCorner:
+            self.cornerCallback(self.lastCorner)
     
+    def clearRepeat(self):
+        self.lastMove = None
+        self.lastCorner = None
+
     def distanceToLine(self, pos, x1, y1, x2, y2):
         xlen = x2 - x1
         ylen = y2 - y1
@@ -192,8 +224,9 @@ class XYButtons(BufferedCanvas):
         gc = wx.GraphicsContext.Create(dc)
 
         center = wx.Point(XYButtons.center[0], XYButtons.center[1])
-        w, h = (self.bg_bmp.GetWidth(), self.bg_bmp.GetHeight())
-        gc.DrawBitmap(self.bg_bmp, 0, 0, w, h)
+        if self.bg_bmp:
+            w, h = (self.bg_bmp.GetWidth(), self.bg_bmp.GetHeight())
+            gc.DrawBitmap(self.bg_bmp, 0, 0, w, h)
         
         if self.enabled:
             # Brush and pen for grey overlay when mouse hovers over
@@ -262,6 +295,9 @@ class XYButtons(BufferedCanvas):
                 self.concentric = self.keypad_idx
                 x, y = self.getMovement()
                 self.moveCallback(x, y)
+        elif evt.GetKeyCode() == wx.WXK_SPACE:
+            self.spacebarCallback()
+
 
     def OnMotion(self, event):
         if not self.enabled:
@@ -314,9 +350,13 @@ class XYButtons(BufferedCanvas):
                     if self.quadrant != None:
                         x, y = self.getMovement()
                         if self.moveCallback:
+                            self.lastMove = (x, y)
+                            self.lastCorner = None
                             self.moveCallback(x, y)
                 elif self.corner != None:
                     if self.cornerCallback:
+                        self.lastCorner = self.corner
+                        self.lastMove = None
                         self.cornerCallback(self.corner)
         else:
             if self.keypad_idx == idx:
